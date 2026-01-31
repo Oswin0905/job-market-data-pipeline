@@ -1,0 +1,6 @@
+job_id,job_title,company_id,location_id,description
+1,data engineer,1,1,build data pipelines and maintain etl systems
+2,junior data analyst,2,2,analyze datasets and build dashboards
+3,ml engineer,3,3,develop ml models and deploy to production
+4,data engineer,1,1,work on scalable data infrastructure
+5,backend engineer,4,4,build apis and data services
