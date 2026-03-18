@@ -1,95 +1,96 @@
-# job-market-data-pipeline
+# Job Market Data Pipeline
 
-Job market Data Engineering Pipeline
+Batch ETL pipeline that turns raw job postings (CSV) into cleaned files, a small dimensional model (companies, locations, jobs), and a SQLite warehouse for SQL analytics.
 
-This project implements an end-to-end data pipeline that ingests raw job market data, cleans and transforms it, and stores it in a structured, analysis-ready format.
-The goal is to simulate how real-world job posting data would be processed in a production-style analytics workflow.
+## What it does
 
-The pipeline is designed with clarity, reproducibility, and scalability in mind, following best practices used in data engineering and analytics roles.
+| Step        | Role |
+|------------|------|
+| **Ingest** | Validate required columns; copy source CSV to a raw landing zone |
+| **Clean**  | Normalize headers and text; drop bad rows; deduplicate |
+| **Transform** | Build `companies` / `locations` / `jobs` CSVs with surrogate keys |
+| **Load**   | Apply SQL schema; clear tables; reload from CSV into SQLite |
 
+Outputs under `data/blob/` mirror a typical **raw → processed → warehouse** layout for a future move to object storage and a cloud database.
 
+## Repository layout
 
-**Project Objectives**
+```
+job-market-data-pipeline/
+├── README.md
+├── requirements.txt
+├── sql/
+│   ├── schema.sql      # DDL for SQLite
+│   └── analytics.sql   # example analytics queries
+├── data/
+│   ├── raw/            # put your source CSV here (default: jobs_raw.csv)
+│   ├── processed/      # legacy fallback paths only
+│   └── blob/           # pipeline outputs (created on run)
+│       ├── raw/
+│       ├── processed/
+│       └── warehouse/  # job_market.db
+└── src/
+    ├── settings.py     # paths and input resolution
+    ├── io_utils.py     # shared DataFrame helpers
+    ├── ingest.py
+    ├── clean.py
+    ├── transform.py
+    ├── load.py
+    └── pipeline.py     # runs all steps in order
+```
 
-Transform raw, messy job market data into a clean, structured dataset
+## Prerequisites
 
-Design a relational data model suitable for downstream analytics
+- Python 3.9+ recommended
+- `pandas` (see `requirements.txt`)
 
-Apply data cleaning and transformation logic using Python
+## Setup
 
-Store processed data in formats suitable for querying and analysis
-
-Organize the project as a modular, reusable pipeline
-
-**Data Source**
-
-The pipeline operates on publicly available job posting datasets (CSV format), containing information such as:
-
-- Job titles
-- Companies
-- Locations
-- Employment details (e.g. full-time/part-time)
-- Descriptions and metadata
-
-The pipeline is intentionally dataset-agnostic and can be adapted to other job market datasets with minimal changes.
-
-
-
-**Data Model**
-
-The processed data is structured using a relational model, making it suitable for SQL-based analysis.
-
-Example tables:
-
-jobs — job title, description, company ID, location ID
-
-companies — company name and metadata
-
-locations — city, region, country
-
-This design avoids duplication, improves data integrity, and mirrors real-world analytical databases.
-
-
-
-
-**Key Features & Techniques**
-
-Python-based data processing (pandas, sqlite3)
-
-Data validation and cleaning (missing values, normalization)
-
-Separation of concerns via modular scripts
-
-Reproducible pipeline design
-
-Storage in CSV and SQLite for flexible downstream usage
-
-Clear folder structure aligned with industry conventions
-
-
-
-**How to Run the Pipeline**
-
-Clone the repository:
-
+```bash
 git clone https://github.com/Oswin0905/job-market-data-pipeline.git
 cd job-market-data-pipeline
-
-
-Install dependencies:
-
 pip install -r requirements.txt
+```
 
+Place a CSV at `data/raw/jobs_raw.csv` with at least:
 
-Run the pipeline steps:
+`job_title`, `company`, `location`, `description`
 
+## Run
+
+**Step by step** (from repo root):
+
+```bash
 python src/ingest.py
 python src/clean.py
 python src/transform.py
+python src/load.py
+```
 
+**End-to-end:**
 
-Output:
+```bash
+python src/pipeline.py
+```
 
-Clean datasets in data/processed/
+## Configuration
 
-Structured SQLite database in outputs/
+Paths live in **`src/settings.py`**:
+
+- **`PipelinePaths.RAW_SOURCE_JOBS_CSV`** — source file for ingest
+- **`data/blob/...`** — landing, processed CSVs, and SQLite DB
+
+If blob outputs are missing, **clean** can read legacy `data/processed/raw_jobs.csv`; **transform** can read legacy `data/processed/clean_jobs.csv`; **load** can read legacy dimensional CSVs under `data/processed/`.
+
+## Analytics
+
+After load, query `data/blob/warehouse/job_market.db` or run statements from `sql/analytics.sql`.
+
+## Design notes
+
+- **Idempotent load**: tables are truncated in FK-safe order before each reload so reruns (including full pipeline) do not violate primary/unique keys.
+- **Separation of concerns**: each step is one module; shared column logic lives in `io_utils.py`; paths in `settings.py`.
+
+## License / portfolio
+
+Suitable as a portfolio example of a small, readable data engineering workflow. Extend with orchestration (e.g. Airflow, ADF), cloud storage, and a managed database when you outgrow local SQLite.

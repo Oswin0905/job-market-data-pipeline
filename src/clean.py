@@ -1,38 +1,45 @@
+"""
+Clean: normalize text, drop invalid rows, deduplicate; write cleaned jobs CSV.
+"""
+
 import pandas as pd
-from pathlib import Path
 
-IN_PATH = Path("data/processed/raw_jobs.csv")
-OUT_PATH = Path("data/processed/clean_jobs.csv")
+from io_utils import normalize_column_names, normalize_string_columns
+from settings import PipelinePaths, resolve_clean_step_input_csv
+
+MINIMAL_COLUMNS = frozenset({"job_title", "company"})
 
 
-def main():
-    if not IN_PATH.exists():
-        raise FileNotFoundError(f"Ingested file not found: {IN_PATH}")
+def run_clean() -> None:
+    """Load raw landing (or legacy), clean, write processed clean_jobs.csv."""
+    input_path = resolve_clean_step_input_csv()
+    if not input_path.exists():
+        raise FileNotFoundError(f"Ingested file not found: {input_path}")
 
-    df = pd.read_csv(IN_PATH)
+    jobs_df = pd.read_csv(input_path)
+    normalize_column_names(jobs_df)
 
-    # normalize column names
-    df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
+    if not MINIMAL_COLUMNS.issubset(jobs_df.columns):
+        raise ValueError(
+            "Input must contain at least 'job_title' and 'company' columns"
+        )
 
-    # required columns check
-    if "job_title" not in df.columns or "company" not in df.columns:
-        raise ValueError("Input must contain at least 'job_title' and 'company' columns")
+    normalize_string_columns(jobs_df)
 
-    # normalize text columns: fillna -> strip -> lowercase
-    for col in df.columns:
-        if pd.api.types.is_string_dtype(df[col]) or df[col].dtype == object:
-            df[col] = df[col].fillna("").astype(str).str.strip().str.lower()
+    jobs_df = jobs_df[
+        ~((jobs_df["job_title"] == "") | (jobs_df["company"] == ""))
+    ]
+    jobs_df = jobs_df.drop_duplicates()
 
-    # drop rows where job_title or company are empty after normalization
-    df = df[~((df["job_title"] == "") | (df["company"] == ""))]
+    output_path = PipelinePaths.CLEAN_JOBS_CSV
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    jobs_df.to_csv(output_path, index=False)
 
-    # remove duplicate rows (exact duplicates)
-    df = df.drop_duplicates()
+    print(f"Cleaned {len(jobs_df)} records -> {output_path}")
 
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(OUT_PATH, index=False)
 
-    print(f"Cleaned {len(df)} records -> {OUT_PATH}")
+def main() -> None:
+    run_clean()
 
 
 if __name__ == "__main__":

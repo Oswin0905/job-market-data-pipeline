@@ -1,46 +1,45 @@
 """
-End-to-end pipeline orchestrator.
+Orchestrate the full pipeline: ingest → clean → transform → load.
 
-Runs all steps: ingest -> clean -> transform -> load
+Run from repository root:
+    python src/pipeline.py
 """
 
 import sys
-from pathlib import Path
 
-# Add src to path to import modules
-sys.path.insert(0, str(Path(__file__).parent))
+from clean import run_clean
+from ingest import run_ingest
+from load import run_load
+from transform import run_transform
 
-from ingest import main as ingest_main
-from clean import main as clean_main
-from transform import main as transform_main
-from load import main as load_main
+STEP_RUNNERS = (
+    ("ingest", run_ingest),
+    ("clean", run_clean),
+    ("transform", run_transform),
+    ("load", run_load),
+)
 
 
-def main():
+def run_pipeline() -> None:
     print("=" * 60)
     print("JOB MARKET DATA PIPELINE")
     print("=" * 60)
 
     try:
-        print("\n[1/4] Running ingest...")
-        ingest_main()
-
-        print("\n[2/4] Running clean...")
-        clean_main()
-
-        print("\n[3/4] Running transform...")
-        transform_main()
-
-        print("\n[4/4] Running load...")
-        load_main()
+        for index, (step_name, runner) in enumerate(STEP_RUNNERS, start=1):
+            print(f"\n[{index}/4] Running {step_name}...")
+            runner()
 
         print("\n" + "=" * 60)
-        print("✅ PIPELINE COMPLETE")
+        print("PIPELINE COMPLETE")
         print("=" * 60)
-
-    except Exception as e:
-        print(f"\n❌ PIPELINE FAILED: {e}")
+    except Exception as exc:
+        print(f"\nPIPELINE FAILED: {exc}")
         sys.exit(1)
+
+
+def main() -> None:
+    run_pipeline()
 
 
 if __name__ == "__main__":

@@ -1,36 +1,30 @@
+"""
+Transform: build dimensional CSVs (companies, locations) and jobs fact from clean data.
+"""
+
 import pandas as pd
-from pathlib import Path
 
-IN_PATH = Path("data/processed/clean_jobs.csv")
-OUT_DIR = Path("data/processed")
+from io_utils import normalize_column_names
+from settings import PipelinePaths, resolve_transform_step_input_csv
+
+MINIMAL_COLUMNS = frozenset({"job_title", "company"})
 
 
-def main():
-    if not IN_PATH.exists():
-        raise FileNotFoundError(f"Cleaned input not found: {IN_PATH}. Run src/clean.py first.")
-
-    df = pd.read_csv(IN_PATH)
-
-    # normalize column names to expected names
-    df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
-
-    # ensure expected columns exist
-    if "job_title" not in df.columns or "company" not in df.columns:
-        raise ValueError("Input must contain at least 'job_title' and 'company' columns")
-
-    # create companies table
+def _build_companies_dimension(jobs_df: pd.DataFrame) -> pd.DataFrame:
     companies = (
-        df[["company"]]
+        jobs_df[["company"]]
         .drop_duplicates()
         .reset_index(drop=True)
         .rename(columns={"company": "company_name"})
     )
     companies.insert(0, "company_id", range(1, len(companies) + 1))
+    return companies
 
-    # create locations table (if location column exists)
-    if "location" in df.columns:
+
+def _build_locations_dimension(jobs_df: pd.DataFrame) -> pd.DataFrame:
+    if "location" in jobs_df.columns:
         locations = (
-            df[["location"]]
+            jobs_df[["location"]]
             .fillna("")
             .drop_duplicates()
             .reset_index(drop=True)
@@ -41,32 +35,75 @@ def main():
 
     if not locations.empty:
         locations.insert(0, "location_id", range(1, len(locations) + 1))
+    return locations
 
-    # map company and location ids into jobs
-    comp_map = dict(zip(companies["company_name"], companies["company_id"]))
-    if not locations.empty:
-        loc_map = dict(zip(locations["location_name"], locations["location_id"]))
+
+def _build_jobs_fact(
+    jobs_df: pd.DataFrame,
+    companies_df: pd.DataFrame,
+    locations_df: pd.DataFrame,
+) -> pd.DataFrame:
+    company_name_to_id = dict(
+        zip(companies_df["company_name"], companies_df["company_id"])
+    )
+    if locations_df.empty:
+        location_name_to_id = {}
     else:
-        loc_map = {}
+        location_name_to_id = dict(
+            zip(locations_df["location_name"], locations_df["location_id"])
+        )
 
-    jobs = pd.DataFrame()
-    jobs["job_title"] = df["job_title"]
-    jobs["company_id"] = df["company"].map(comp_map)
-    if "location" in df.columns:
-        jobs["location_id"] = df["location"].map(lambda x: loc_map.get(x, pd.NA))
+    fact = pd.DataFrame()
+    fact["job_title"] = jobs_df["job_title"]
+    fact["company_id"] = jobs_df["company"].map(company_name_to_id)
+    if "location" in jobs_df.columns:
+        fact["location_id"] = jobs_df["location"].map(
+            lambda name: location_name_to_id.get(name, pd.NA)
+        )
     else:
-        jobs["location_id"] = pd.NA
-    jobs["description"] = df["description"] if "description" in df.columns else ""
+        fact["location_id"] = pd.NA
+    fact["description"] = (
+        jobs_df["description"] if "description" in jobs_df.columns else ""
+    )
+    fact = fact.reset_index(drop=True)
+    fact.insert(0, "job_id", range(1, len(fact) + 1))
+    return fact
 
-    jobs = jobs.reset_index(drop=True)
-    jobs.insert(0, "job_id", range(1, len(jobs) + 1))
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    companies.to_csv(OUT_DIR / "companies.csv", index=False)
-    locations.to_csv(OUT_DIR / "locations.csv", index=False)
-    jobs.to_csv(OUT_DIR / "jobs.csv", index=False)
+def run_transform() -> None:
+    """Read cleaned jobs, emit companies / locations / jobs CSVs for load."""
+    input_path = resolve_transform_step_input_csv()
+    if not input_path.exists():
+        raise FileNotFoundError(
+            f"Cleaned input not found: {input_path}. Run src/clean.py first."
+        )
 
-    print(f"Wrote {len(companies)} companies, {len(locations)} locations, {len(jobs)} jobs to {OUT_DIR}")
+    jobs_df = pd.read_csv(input_path)
+    normalize_column_names(jobs_df)
+
+    if not MINIMAL_COLUMNS.issubset(jobs_df.columns):
+        raise ValueError(
+            "Input must contain at least 'job_title' and 'company' columns"
+        )
+
+    companies_df = _build_companies_dimension(jobs_df)
+    locations_df = _build_locations_dimension(jobs_df)
+    jobs_fact_df = _build_jobs_fact(jobs_df, companies_df, locations_df)
+
+    out_dir = PipelinePaths.BLOB_PROCESSED_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    companies_df.to_csv(PipelinePaths.COMPANIES_CSV, index=False)
+    locations_df.to_csv(PipelinePaths.LOCATIONS_CSV, index=False)
+    jobs_fact_df.to_csv(PipelinePaths.JOBS_CSV, index=False)
+
+    print(
+        f"Wrote {len(companies_df)} companies, {len(locations_df)} locations, "
+        f"{len(jobs_fact_df)} jobs to {out_dir}"
+    )
+
+
+def main() -> None:
+    run_transform()
 
 
 if __name__ == "__main__":
